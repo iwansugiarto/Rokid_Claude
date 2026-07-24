@@ -69,6 +69,42 @@ class MainActivity : ComponentActivity() {
         try { startActivity(Intent(this, ScannerActivity::class.java)) } catch (_: Exception) {}
     }
 
+    @Volatile private var awaitingPhoto = false   // 已拉起拍照页,等它写 pending.jpg 回来
+
+    /** PhotoActivity 写照片的交接文件。 */
+    private fun pendingPhotoFile() = java.io.File(getExternalFilesDir("photos"), "pending.jpg")
+
+    /** 语音"拍照" → 拉起取景页;拍完回到本页由 onResume 接手发送。 */
+    private fun openPhoto() {
+        awaitingPhoto = true
+        try { startActivity(Intent(this, PhotoActivity::class.java)) } catch (_: Exception) { awaitingPhoto = false }
+    }
+
+    /** 取走 PhotoActivity 拍好的照片 → base64 发给 relay(附加到下一条 prompt)。 */
+    override fun onResume() {
+        super.onResume()
+        val f = pendingPhotoFile()
+        // 语音流程置 awaitingPhoto;此外 60s 内的新鲜照片也收(拍照页被外部拉起时同样生效)
+        val fresh = f.exists() && System.currentTimeMillis() - f.lastModified() < 60_000
+        if (!awaitingPhoto && !fresh) return
+        awaitingPhoto = false
+        if (!f.exists()) return   // 用户取消(双击退出取景)
+        try {
+            val b64 = android.util.Base64.encodeToString(f.readBytes(), android.util.Base64.NO_WRAP)
+            f.delete()
+            client.sendPhoto(b64)
+            hud.add("📷", Color(0xFF00AA77))
+            hud.status = s.photoAttached
+            // 拍完立即开录:照片+指令一次说完一起提交,不用再点一下
+            if (audioGranted.value && !recording) {
+                voice.start(); recording = true; hud.recording = true
+                refreshKeepOn()
+            }
+        } catch (_: Exception) {
+            hud.status = s.photoFailed
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         audioGranted.value =
@@ -91,6 +127,8 @@ class MainActivity : ComponentActivity() {
                     enterModelChoice(msg)
                 } else if (msg is ServerMessage.PermissionRequest) {
                     enterChoice(msg)
+                } else if (msg is ServerMessage.PhotoAck) {
+                    hud.status = if (msg.file.isEmpty()) s.photoFailed else s.photoAttached
                 } else if (msg is ServerMessage.Transcript) {
                     val t = msg.text.trim().trim('。', '，', '!', '！', '.', ' ')
                     when {
@@ -100,6 +138,7 @@ class MainActivity : ComponentActivity() {
                         }
                         matchesExit(msg.text, lang) -> { hud.status = s.exitMsg; finish() }
                         matchesWifi(msg.text, lang) -> openWifiSettings()
+                        matchesPhoto(msg.text, lang) -> openPhoto()
                         matchesLangSwitch(msg.text) -> switchLang(if (lang == "zh") "en" else "zh")
                         else -> {
                             hud.add("▶ $t", Color(0xFF00AA77)); hud.status = s.submitting; running = true; refreshKeepOn()
@@ -275,6 +314,7 @@ fun handle(msg: ServerMessage, state: HudState, s: Strings) {
         is ServerMessage.PermissionRequest -> {}  // 在 onMessage 上游处理(进选择模式)
         is ServerMessage.Usage -> {}
         is ServerMessage.ModelRequest -> {}
+        is ServerMessage.PhotoAck -> {}           // 在 onMessage 上游处理(状态提示)
         ServerMessage.Unknown -> {}
     }
 }

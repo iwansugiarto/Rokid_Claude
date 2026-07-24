@@ -18,6 +18,13 @@ private val LANG_SWITCH = setOf(
     "switch language", "change language", "switch lang", "toggle language", "language switch",
 )
 
+// 拍照口令:拍一张给 Claude 看(含 whisper 常见变体)。
+private val PHOTO_ZH = setOf("拍照", "拍个照", "拍张照", "照相", "拍照片", "看这个", "看看这个", "拍一张")
+private val PHOTO_EN = setOf(
+    "take photo", "take a photo", "take picture", "take a picture",
+    "photo", "capture photo", "look at this", "take a pic",
+)
+
 private fun norm(t: String) = t.trim().trim('。', '，', '!', '！', '.', ' ').lowercase()
 
 fun matchesNewSession(text: String, lang: String): Boolean =
@@ -30,3 +37,6 @@ fun matchesWifi(text: String, lang: String): Boolean =
     (if (lang == "en") WIFI_EN else WIFI_ZH).contains(norm(text))
 
 fun matchesLangSwitch(text: String): Boolean = LANG_SWITCH.contains(norm(text))
+
+fun matchesPhoto(text: String, lang: String): Boolean =
+    (if (lang == "en") PHOTO_EN else PHOTO_ZH).contains(norm(text))

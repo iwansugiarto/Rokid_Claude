@@ -5,9 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRelayServer } from './server';
 
-/** 起一个 relay,注入会记录被调语言的假转写器和空跑 runner。 */
+/** 起一个 relay,注入会记录被调语言的假转写器和记录 prompt 的空跑 runner。 */
 function makeServer() {
   const langSeen: string[] = [];
+  const prompts: string[] = [];
   const transcriber = async (_wav: string, _model: string, lang: 'zh' | 'en') => {
     langSeen.push(lang);
     return '';
@@ -16,9 +17,9 @@ function makeServer() {
   const srv = createRelayServer({
     sandboxDir: dir, webDir: dir, stateDir: dir, modelPath: 'unused',
     transcriber,
-    runner: () => ({ events: (async function* () {})(), stop() {} }),
+    runner: (o) => { prompts.push(o.prompt); return { events: (async function* () {})(), stop() {} }; },
   });
-  return { srv, langSeen };
+  return { srv, langSeen, prompts, dir };
 }
 
 function connect(port: number): Promise<WebSocket> {
@@ -56,6 +57,55 @@ describe('setLang', () => {
     ws.send(JSON.stringify({ type: 'audio', wav }));
     await waitFor(ws, 'transcript');
     expect(langSeen).toEqual(['zh', 'en']);
+
+    ws.close();
+    await new Promise<void>((r) => srv.http.close(() => r()));
+  });
+});
+
+describe('photo attach', () => {
+  it('saves the photo, acks, and prefixes only the next prompt', async () => {
+    const { srv, prompts, dir } = makeServer();
+    await new Promise<void>((r) => srv.http.listen(0, r));
+    const port = (srv.http.address() as any).port;
+    const ws = await connect(port);
+    ws.send(JSON.stringify({ type: 'hello', lang: 'en' }));
+
+    const jpeg = Buffer.from('fake-jpeg-bytes').toString('base64');
+    ws.send(JSON.stringify({ type: 'photo', jpeg }));
+    const ack = await waitFor(ws, 'photoAck');
+    expect(ack.file).toMatch(/^\.\/photos\/photo-\d+\.jpg$/);
+    const saved = await import('node:fs/promises').then((fs) => fs.readFile(join(dir, ack.file)));
+    expect(saved.toString()).toBe('fake-jpeg-bytes');
+
+    ws.send(JSON.stringify({ type: 'prompt', prompt: 'what is this?' }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toBe(`Look at the image file ${ack.file} first, then: what is this?`);
+
+    // 照片只附加一次:下一条 prompt 不再带前缀
+    ws.send(JSON.stringify({ type: 'prompt', prompt: 'and now?' }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(prompts[1]).toBe('and now?');
+
+    ws.close();
+    await new Promise<void>((r) => srv.http.close(() => r()));
+  });
+
+  it('newSession clears a pending photo', async () => {
+    const { srv, prompts } = makeServer();
+    await new Promise<void>((r) => srv.http.listen(0, r));
+    const port = (srv.http.address() as any).port;
+    const ws = await connect(port);
+    ws.send(JSON.stringify({ type: 'hello', lang: 'en' }));
+
+    ws.send(JSON.stringify({ type: 'photo', jpeg: Buffer.from('x').toString('base64') }));
+    await waitFor(ws, 'photoAck');
+    ws.send(JSON.stringify({ type: 'newSession' }));
+    await new Promise((r) => setTimeout(r, 50));
+    ws.send(JSON.stringify({ type: 'prompt', prompt: 'plain' }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(prompts[0]).toBe('plain');
 
     ws.close();
     await new Promise<void>((r) => srv.http.close(() => r()));

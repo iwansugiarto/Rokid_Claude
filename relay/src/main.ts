@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createRelayServer } from './server';
 import { runClaude } from './claude-runner';
@@ -24,6 +24,9 @@ writeFileSync(settingsPath, JSON.stringify({
     }],
   },
 }));
+
+// sandbox 是 gitignore 的运行目录:不存在时 spawn claude 会报误导性的 ENOENT(缺的是 cwd 不是二进制)
+mkdirSync(join(root, 'sandbox'), { recursive: true });
 
 const { http } = createRelayServer({
   sandboxDir: join(root, 'sandbox'),

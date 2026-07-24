@@ -23,5 +23,8 @@
         <activity
             android:name=".ScannerActivity"
             android:exported="false" />
+        <activity
+            android:name=".PhotoActivity"
+            android:exported="false" />
     </application>
 </manifest>

@@ -18,7 +18,10 @@ class RelayClient(
 ) {
     private var lang = lang                   // 可变:setLang 更新,重连 hello 用最新值
     private val s get() = strings(this.lang)  // 随 lang 走,断线重连用切换后语言的状态文案
-    private val client = OkHttpClient()
+    // pingInterval:穿 NAT/反代的长连接会被静默回收,周期 ping 保活 + 快速发现死链(否则要等下次发送才知道)
+    private val client = OkHttpClient.Builder()
+        .pingInterval(20, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
     private val main = Handler(Looper.getMainLooper())
     private var ws: WebSocket? = null
     private var closed = false
@@ -61,6 +64,9 @@ class RelayClient(
     }
     fun sendAudio(wavBase64: String) {
         send(JSONObject().put("type", "audio").put("wav", wavBase64).toString())
+    }
+    fun sendPhoto(jpegBase64: String) {
+        send(JSONObject().put("type", "photo").put("jpeg", jpegBase64).toString())
     }
     fun stop() = send("""{"type":"stop"}""")
     fun newSession() = send("""{"type":"newSession"}""")

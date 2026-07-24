@@ -39,6 +39,9 @@ data class Strings(
     val confirmHint: String,
     val configApplied: String,
     val unknownQr: String,
+    val photoHint: String,
+    val photoAttached: String,
+    val photoFailed: String,
 )
 
 private val ZH = Strings(
@@ -56,6 +59,8 @@ private val ZH = Strings(
     wifiSaved = "✅ 已保存网络", wifiNotSaved = "⚠️ 未保存", cameraDenied = "相机未授权",
     connectTo = "连接到", confirmHint = "单击确认 · 双击取消",
     configApplied = "✅ 已配置,正在重连", unknownQr = "无法识别的二维码",
+    photoHint = "单击拍照 · 双击取消",
+    photoAttached = "📷 照片已附加 · 说出你的问题", photoFailed = "⚠️ 拍照失败",
 )
 
 private val EN = Strings(
@@ -73,6 +78,8 @@ private val EN = Strings(
     wifiSaved = "✅ Network saved", wifiNotSaved = "⚠️ Not saved", cameraDenied = "Camera not authorized",
     connectTo = "Connect to", confirmHint = "tap to confirm · double-tap to cancel",
     configApplied = "✅ Configured, reconnecting", unknownQr = "unrecognized QR code",
+    photoHint = "tap to shoot · double-tap to cancel",
+    photoAttached = "📷 Photo attached · speak your question", photoFailed = "⚠️ Photo failed",
 )
 
 fun strings(lang: String): Strings = if (lang == "en") EN else ZH

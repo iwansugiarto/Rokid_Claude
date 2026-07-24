@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile, writeFile, unlink } from 'node:fs/promises';
+import { readFile, writeFile, unlink, mkdir } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -45,6 +45,7 @@ export function createRelayServer(opts: ServerOptions) {
   const broadcast = (msg: unknown) => { for (const send of clients) send(msg); };
 
   let lang: Lang = 'zh';                      // 本连接语言(hello 时由客户端 config 传入)
+  let pendingPhoto: string | null = null;     // 待附加的照片(sandbox 相对路径),下一条 prompt 消费
   let currentModel: string | null = null;   // 最近一次 system 事件的真实模型(全 id)
   let selectedModel: ModelAlias | null = null;  // 用户语音选定的别名(opus/sonnet/haiku),开跑前即显示
   let sessionCostUsd = 0;
@@ -181,7 +182,7 @@ export function createRelayServer(opts: ServerOptions) {
     store.on('runEnd', onRunEnd);
 
     ws.on('message', (data) => {
-      let msg: { type?: string; prompt?: string; lastRunId?: string; lastSeq?: number; wav?: string; id?: string; choice?: string; allowKey?: string; lang?: string };
+      let msg: { type?: string; prompt?: string; lastRunId?: string; lastSeq?: number; wav?: string; jpeg?: string; id?: string; choice?: string; allowKey?: string; lang?: string };
       try { msg = JSON.parse(data.toString()); } catch { return; }
 
       if (msg.type === 'hello') {
@@ -211,14 +212,34 @@ export function createRelayServer(opts: ServerOptions) {
           return;
         }
         const dict = opts.dictionaryDir ? loadDictionary(join(opts.dictionaryDir, `dictionary.${lang}.json`)) : {};
-        const text = expandPrompt(msg.prompt, dict);
+        let text = expandPrompt(msg.prompt, dict);
+        if (pendingPhoto) {
+          text = `Look at the image file ${pendingPhoto} first, then: ${text}`;
+          pendingPhoto = null;
+        }
         void startRun(text);
+        return;
+      }
+      if (msg.type === 'photo' && typeof msg.jpeg === 'string') {
+        const jpeg = msg.jpeg;
+        void (async () => {
+          try {
+            const dir = join(opts.sandboxDir, 'photos');
+            await mkdir(dir, { recursive: true });
+            const name = `photo-${Date.now()}.jpg`;
+            await writeFile(join(dir, name), Buffer.from(jpeg, 'base64'));
+            pendingPhoto = `./photos/${name}`;
+            send({ type: 'photoAck', file: pendingPhoto });
+          } catch {
+            send({ type: 'photoAck', file: '' });
+          }
+        })();
         return;
       }
       if (msg.type === 'audio' && typeof msg.wav === 'string') { void handleAudio(ws, msg.wav); return; }
       if (msg.type === 'stop') { current?.stop(); return; }
       if (msg.type === 'newSession') {
-        store.newSession(); allowedSet.clear();
+        store.newSession(); allowedSet.clear(); pendingPhoto = null;
         currentModel = null; selectedModel = null; sessionCostUsd = 0; sessionTokens = 0;
         broadcastUsage();
         return;

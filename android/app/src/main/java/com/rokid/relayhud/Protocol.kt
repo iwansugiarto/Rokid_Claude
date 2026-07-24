@@ -32,6 +32,7 @@ sealed interface ServerMessage {
     data class PermissionRequest(val id: String, val summary: String, val options: List<String>, val allowKey: String, val timeoutChoice: String) : ServerMessage
     data class Usage(val model: String?, val costUsd: Double, val tokens: Long) : ServerMessage
     data class ModelRequest(val id: String, val options: List<String>, val current: Int, val timeoutChoice: String) : ServerMessage
+    data class PhotoAck(val file: String) : ServerMessage
     object Unknown : ServerMessage
 }
 
@@ -92,6 +93,7 @@ fun parseServerMessage(text: String): ServerMessage = try {
             val opts = (o["options"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
             ServerMessage.ModelRequest(o.str("id") ?: "", opts, o.int("current") ?: 0, o.str("timeoutChoice") ?: (opts.lastOrNull() ?: ""))
         }
+        "photoAck" -> ServerMessage.PhotoAck(o.str("file") ?: "")
         else -> ServerMessage.Unknown
     }
 } catch (_: Exception) {
