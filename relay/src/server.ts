@@ -10,6 +10,7 @@ import { checkToken } from './auth';
 import { decide, summarize } from './permission';
 import { expandPrompt, loadDictionary } from './dictionary';
 import { parseModelCommand, modelArg, type ModelAlias } from './model';
+import { parseSessionCommand, listRecentSessions, type SessionEntry } from './sessions';
 import { tr, normalizeLang, type Lang } from './i18n';
 
 type RunnerFn = (opts: { prompt: string; cwd: string; sessionId?: string; model?: string }) => RunHandle;
@@ -22,6 +23,7 @@ export interface ServerOptions {
   modelPath: string;
   token?: string;
   dictionaryDir?: string;
+  projectsDir?: string;   // ~/.claude/projects;不传则禁用会话切换
   runner?: RunnerFn;
   transcriber?: TranscriberFn;
 }
@@ -46,6 +48,8 @@ export function createRelayServer(opts: ServerOptions) {
 
   let lang: Lang = 'zh';                      // 本连接语言(hello 时由客户端 config 传入)
   let pendingPhoto: string | null = null;     // 待附加的照片(sandbox 相对路径),下一条 prompt 消费
+  let activeCwd: string | null = null;        // 选定会话所属项目;之后的 run 都在这里跑(newSession 归位 sandbox)
+  let resumeTarget: string | null = null;     // 选定会话 id,仅首个 run 用 --resume 接上,之后走 store 链
   let currentModel: string | null = null;   // 最近一次 system 事件的真实模型(全 id)
   let selectedModel: ModelAlias | null = null;  // 用户语音选定的别名(opus/sonnet/haiku),开跑前即显示
   let sessionCostUsd = 0;
@@ -69,6 +73,24 @@ export function createRelayServer(opts: ServerOptions) {
       const finish = (choice: string) => { if (done) return; done = true; pending.delete(id); resolve(choice); };
       pending.set(id, finish);
       broadcast({ type: 'modelRequest', id, options, current: currentIdx < 0 ? 0 : currentIdx, timeoutChoice: cancel });
+      setTimeout(() => finish(cancel), timeoutMs);
+    });
+  }
+
+  /** 发 sessionRequest(可恢复会话列表),等用户在眼镜滑选。超时=取消。复用 pending(由 permissionDecision 兑现)。 */
+  function requestSessionChoice(sessions: SessionEntry[], timeoutMs = 60000): Promise<SessionEntry | null> {
+    const id = `sess-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const cancel = tr(lang).modelCancel;
+    const options = [...sessions.map((s) => s.label), cancel];
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (choice: string) => {
+        if (done) return;
+        done = true; pending.delete(id);
+        resolve(sessions.find((s) => s.label === choice) ?? null);
+      };
+      pending.set(id, finish);
+      broadcast({ type: 'sessionRequest', id, options, current: 0, timeoutChoice: cancel });
       setTimeout(() => finish(cancel), timeoutMs);
     });
   }
@@ -121,7 +143,9 @@ export function createRelayServer(opts: ServerOptions) {
   async function startRun(prompt: string): Promise<void> {
     const run = store.startRun(prompt);
     currentRunId = run.id;
-    const handle = runner({ prompt, cwd: opts.sandboxDir, sessionId: run.sessionId, model: selectedModel ? modelArg(selectedModel) : undefined });
+    const resumeId = resumeTarget ?? run.sessionId;
+    resumeTarget = null;   // 只在接上会话的首个 run 用;之后 store 链会跟着 system 事件走
+    const handle = runner({ prompt, cwd: activeCwd ?? opts.sandboxDir, sessionId: resumeId, model: selectedModel ? modelArg(selectedModel) : undefined });
     current = handle;
     try {
       for await (const event of handle.events) {
@@ -204,6 +228,15 @@ export function createRelayServer(opts: ServerOptions) {
         return;
       }
       if (msg.type === 'prompt' && msg.prompt) {
+        if (opts.projectsDir && parseSessionCommand(msg.prompt, lang)) {
+          const sessions = listRecentSessions(opts.projectsDir, { excludeCwd: opts.sandboxDir });
+          void requestSessionChoice(sessions).then((s) => {
+            if (!s) return;
+            activeCwd = s.cwd;
+            resumeTarget = s.id;
+          });
+          return;
+        }
         const cmd = parseModelCommand(msg.prompt, lang);
         if (cmd?.kind === 'pick') {
           void requestModelChoice(selectedModel).then((choice) => {
@@ -240,6 +273,7 @@ export function createRelayServer(opts: ServerOptions) {
       if (msg.type === 'stop') { current?.stop(); return; }
       if (msg.type === 'newSession') {
         store.newSession(); allowedSet.clear(); pendingPhoto = null;
+        activeCwd = null; resumeTarget = null;   // 归位 sandbox
         currentModel = null; selectedModel = null; sessionCostUsd = 0; sessionTokens = 0;
         broadcastUsage();
         return;

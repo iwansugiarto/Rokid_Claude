@@ -125,6 +125,8 @@ class MainActivity : ComponentActivity() {
                     hud.statusline = statuslineText(msg.model, msg.costUsd, msg.tokens, s)
                 } else if (msg is ServerMessage.ModelRequest) {
                     enterModelChoice(msg)
+                } else if (msg is ServerMessage.SessionRequest) {
+                    enterSessionChoice(msg)
                 } else if (msg is ServerMessage.PermissionRequest) {
                     enterChoice(msg)
                 } else if (msg is ServerMessage.PhotoAck) {
@@ -208,6 +210,16 @@ class MainActivity : ComponentActivity() {
         choiceState = ChoiceState(msg.options)
         choiceTimeoutDefault = msg.timeoutChoice
         hud.choice = PermissionPrompt(msg.id, msg.summary, msg.options, msg.allowKey, 0, 60, title = s.confirm)
+        startCountdown()
+    }
+
+    /** 收到会话选择请求 → 进选择模式(滑动滚列表,单击恢复该会话),超时=取消。 */
+    private fun enterSessionChoice(msg: ServerMessage.SessionRequest) {
+        val cs = ChoiceState(msg.options)
+        repeat(msg.current.coerceIn(0, msg.options.size - 1)) { cs.move(1) }
+        choiceState = cs
+        choiceTimeoutDefault = msg.timeoutChoice
+        hud.choice = PermissionPrompt(msg.id, "", msg.options, "", cs.highlight, 60, title = s.selectSession)
         startCountdown()
     }
 
@@ -314,6 +326,7 @@ fun handle(msg: ServerMessage, state: HudState, s: Strings) {
         is ServerMessage.PermissionRequest -> {}  // 在 onMessage 上游处理(进选择模式)
         is ServerMessage.Usage -> {}
         is ServerMessage.ModelRequest -> {}
+        is ServerMessage.SessionRequest -> {}     // 在 onMessage 上游处理(进选择模式)
         is ServerMessage.PhotoAck -> {}           // 在 onMessage 上游处理(状态提示)
         ServerMessage.Unknown -> {}
     }

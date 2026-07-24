@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { createRelayServer } from './server';
 import { runClaude } from './claude-runner';
 
@@ -33,6 +33,7 @@ const { http } = createRelayServer({
   webDir: join(root, 'web'),
   stateDir: join(root, 'state'),
   modelPath: join(root, 'models', 'ggml-small.bin'),
+  projectsDir: join(homedir(), '.claude', 'projects'),
   token,
   dictionaryDir: root,
   runner: (o) => runClaude({ ...o, settingsPath }),

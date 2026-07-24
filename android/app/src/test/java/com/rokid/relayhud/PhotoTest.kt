@@ -17,6 +17,17 @@ class PhotoTest {
         assertFalse(matchesPhoto("take photo", "zh"))   // 语言隔离,同现有口令的行为
     }
 
+    @Test fun `sessionRequest parses like modelRequest`() {
+        val m = parseServerMessage(
+            """{"type":"sessionRequest","id":"sess-1","options":["fix login · 2h · app","Cancel"],"current":0,"timeoutChoice":"Cancel"}"""
+        )
+        assertTrue(m is ServerMessage.SessionRequest)
+        m as ServerMessage.SessionRequest
+        assertEquals("sess-1", m.id)
+        assertEquals(2, m.options.size)
+        assertEquals("Cancel", m.timeoutChoice)
+    }
+
     @Test fun `photoAck parses into PhotoAck message`() {
         val ok = parseServerMessage("""{"type":"photoAck","file":"./photos/photo-1.jpg"}""")
         assertTrue(ok is ServerMessage.PhotoAck)

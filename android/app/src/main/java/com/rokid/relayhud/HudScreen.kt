@@ -149,13 +149,20 @@ fun HudScreen(state: HudState, connStatus: String, s: Strings, connected: Boolea
                 ) {
                     Text("${p.title} (${p.secondsLeft}s)", style = meta)
                     Text(p.summary, style = body.copy(fontSize = 14.sp), modifier = Modifier.padding(vertical = 6.dp))
-                    p.options.forEachIndexed { i, opt ->
+                    // 窗口化:长列表(会话)只画高亮附近 5 行,上下用 ↑n/↓n 提示还有多少;短列表(模型/权限)原样全画
+                    val win = 5
+                    val first = (p.highlight - win / 2).coerceIn(0, (p.options.size - win).coerceAtLeast(0))
+                    val last = (first + win - 1).coerceAtMost(p.options.size - 1)
+                    if (first > 0) Text("   ↑ $first", style = body.copy(color = DimGreen))
+                    for (i in first..last) {
                         val sel = i == p.highlight
                         Text(
-                            (if (sel) "▸ " else "   ") + opt,
+                            (if (sel) "▸ " else "   ") + p.options[i],
                             style = body.copy(color = if (sel) Green else DimGreen),
+                            maxLines = 1,
                         )
                     }
+                    if (last < p.options.size - 1) Text("   ↓ ${p.options.size - 1 - last}", style = body.copy(color = DimGreen))
                     Text(s.choiceHint, style = meta, modifier = Modifier.padding(top = 6.dp))
                 }
             }

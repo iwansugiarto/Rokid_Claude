@@ -42,6 +42,7 @@ data class Strings(
     val photoHint: String,
     val photoAttached: String,
     val photoFailed: String,
+    val selectSession: String,
 )
 
 private val ZH = Strings(
@@ -61,6 +62,7 @@ private val ZH = Strings(
     configApplied = "✅ 已配置,正在重连", unknownQr = "无法识别的二维码",
     photoHint = "单击拍照 · 双击取消",
     photoAttached = "📷 照片已附加 · 说出你的问题", photoFailed = "⚠️ 拍照失败",
+    selectSession = "选择会话",
 )
 
 private val EN = Strings(
@@ -80,6 +82,7 @@ private val EN = Strings(
     configApplied = "✅ Configured, reconnecting", unknownQr = "unrecognized QR code",
     photoHint = "tap to shoot · double-tap to cancel",
     photoAttached = "📷 Photo attached · speak your question", photoFailed = "⚠️ Photo failed",
+    selectSession = "Select session",
 )
 
 fun strings(lang: String): Strings = if (lang == "en") EN else ZH

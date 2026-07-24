@@ -5,10 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRelayServer } from './server';
 
-/** 起一个 relay,注入会记录被调语言的假转写器和记录 prompt 的空跑 runner。 */
-function makeServer() {
+/** 起一个 relay,注入会记录被调语言的假转写器和记录调用参数的空跑 runner。 */
+function makeServer(projectsDir?: string) {
   const langSeen: string[] = [];
   const prompts: string[] = [];
+  const calls: Array<{ prompt: string; cwd: string; sessionId?: string }> = [];
   const transcriber = async (_wav: string, _model: string, lang: 'zh' | 'en') => {
     langSeen.push(lang);
     return '';
@@ -16,10 +17,15 @@ function makeServer() {
   const dir = mkdtempSync(join(tmpdir(), 'rokid-test-'));
   const srv = createRelayServer({
     sandboxDir: dir, webDir: dir, stateDir: dir, modelPath: 'unused',
+    projectsDir,
     transcriber,
-    runner: (o) => { prompts.push(o.prompt); return { events: (async function* () {})(), stop() {} }; },
+    runner: (o) => {
+      prompts.push(o.prompt);
+      calls.push({ prompt: o.prompt, cwd: o.cwd, sessionId: o.sessionId });
+      return { events: (async function* () {})(), stop() {} };
+    },
   });
-  return { srv, langSeen, prompts, dir };
+  return { srv, langSeen, prompts, calls, dir };
 }
 
 function connect(port: number): Promise<WebSocket> {
@@ -106,6 +112,48 @@ describe('photo attach', () => {
     ws.send(JSON.stringify({ type: 'prompt', prompt: 'plain' }));
     await new Promise((r) => setTimeout(r, 100));
     expect(prompts[0]).toBe('plain');
+
+    ws.close();
+    await new Promise<void>((r) => srv.http.close(() => r()));
+  });
+});
+
+describe('session picker', () => {
+  it('lists sessions, resumes the picked one in its cwd, newSession returns to sandbox', async () => {
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const projects = mkdtempSync(join(tmpdir(), 'rokid-proj-'));
+    const pdir = join(projects, '-Users-x-app');
+    mkdirSync(pdir, { recursive: true });
+    writeFileSync(join(pdir, 'sess-1.jsonl'),
+      JSON.stringify({ type: 'user', cwd: '/Users/x/app', message: { role: 'user', content: 'fix login bug' } }) + '\n');
+
+    const { srv, calls, dir } = makeServer(projects);
+    await new Promise<void>((r) => srv.http.listen(0, r));
+    const port = (srv.http.address() as any).port;
+    const ws = await connect(port);
+    ws.send(JSON.stringify({ type: 'hello', lang: 'en' }));
+
+    ws.send(JSON.stringify({ type: 'prompt', prompt: 'list sessions' }));
+    const req = await waitFor(ws, 'sessionRequest');
+    expect(req.options.some((o: string) => o.includes('fix login bug') && o.includes('app'))).toBe(true);
+    expect(calls).toHaveLength(0);   // 只开选择框,不跑 run
+
+    const label = req.options.find((o: string) => o.includes('fix login bug'));
+    ws.send(JSON.stringify({ type: 'permissionDecision', id: req.id, choice: label, allowKey: '' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    ws.send(JSON.stringify({ type: 'prompt', prompt: 'what were we doing?' }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cwd).toBe('/Users/x/app');
+    expect(calls[0].sessionId).toBe('sess-1');
+
+    ws.send(JSON.stringify({ type: 'newSession' }));
+    await new Promise((r) => setTimeout(r, 50));
+    ws.send(JSON.stringify({ type: 'prompt', prompt: 'back home' }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(calls[1].cwd).toBe(dir);            // 归位 sandbox
+    expect(calls[1].sessionId).toBeUndefined();
 
     ws.close();
     await new Promise<void>((r) => srv.http.close(() => r()));
