@@ -12,6 +12,7 @@ android/local.properties
 android/.idea/
 # Phase 3 远程:本地密钥与配置,绝不进库
 relay/.remote.env
+config.json
 config.local.json
 
 # Release APK 产物(走 GitHub Release,不入库)
