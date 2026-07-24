@@ -18,13 +18,15 @@ class RelayClient(
 ) {
     private var lang = lang                   // 可变:setLang 更新,重连 hello 用最新值
     private val s get() = strings(this.lang)  // 随 lang 走,断线重连用切换后语言的状态文案
-    // pingInterval:穿 NAT/反代的长连接会被静默回收,周期 ping 保活 + 快速发现死链(否则要等下次发送才知道)
+    // pingInterval:穿 NAT/反代的长连接会被静默回收,周期 ping 保活 + 快速发现死链(否则要等下次发送才知道)。
+    // 60s 是省电与 NAT 超时的折中;真正省电靠 pause():灭屏闲置时整条连接断掉,唤醒再连(sync 会补回错过的事件)。
     private val client = OkHttpClient.Builder()
-        .pingInterval(20, java.util.concurrent.TimeUnit.SECONDS)
+        .pingInterval(60, java.util.concurrent.TimeUnit.SECONDS)
         .build()
     private val main = Handler(Looper.getMainLooper())
     private var ws: WebSocket? = null
     private var closed = false
+    @Volatile private var suspended = false   // 闲置暂停:不自动重连,resume() 恢复
 
     fun connect() {
         val req = Request.Builder().url(url)
@@ -51,8 +53,18 @@ class RelayClient(
     }
 
     private fun scheduleReconnect() {
-        if (closed) return
-        main.postDelayed({ if (!closed) connect() }, 1000)
+        if (closed || suspended) return
+        main.postDelayed({ if (!closed && !suspended) connect() }, 1000)
+    }
+
+    /** 闲置省电:断开且不再自动重连(radio 不再被 ping 周期唤醒)。 */
+    fun pause() { suspended = true; ws?.close(1000, null) }
+
+    /** 从闲置恢复:立即重连;错过的事件由 hello→sync replay 补回。 */
+    fun resume() {
+        if (!suspended) return
+        suspended = false
+        connect()
     }
 
     private fun send(json: String) { ws?.send(json) }

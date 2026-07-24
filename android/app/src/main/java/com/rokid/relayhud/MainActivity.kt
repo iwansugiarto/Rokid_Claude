@@ -270,9 +270,41 @@ class MainActivity : ComponentActivity() {
 
     private var wokeAt = 0L
 
+    // 闲置省电:灭屏/熄屏持续 IDLE_DISCONNECT_MS 后断开 WS(radio 停止被 ping 唤醒);唤醒即重连,sync 补事件。
+    private val idler = Handler(Looper.getMainLooper())
+    private val idlePause = object : Runnable {
+        override fun run() {
+            if (recording || running || hud.choice != null) { idler.postDelayed(this, IDLE_DISCONNECT_MS) }
+            else client.pause()
+        }
+    }
+
+    private fun scheduleIdlePause() {
+        idler.removeCallbacksAndMessages(null)
+        idler.postDelayed(idlePause, IDLE_DISCONNECT_MS)
+    }
+
+    private fun cancelIdlePause() {
+        idler.removeCallbacksAndMessages(null)
+        client.resume()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (::client.isInitialized) cancelIdlePause()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // 只在真熄屏时计时;被 Photo/Scanner 页盖住(屏还亮)不算闲置
+        val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        if (!pm.isInteractive) scheduleIdlePause()
+    }
+
     private fun setBlanked(b: Boolean) {
         hud.blanked = b
         if (!b) { wokeAt = SystemClock.uptimeMillis(); hud.scroll(1) }   // 退出灭屏 → 记唤醒时刻 + 滚到最新
+        if (b) scheduleIdlePause() else cancelIdlePause()
         refreshKeepOn()
     }
 
@@ -309,10 +341,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        idler.removeCallbacksAndMessages(null)
         client.close()
         voice.destroy()
     }
 }
+
+private const val IDLE_DISCONNECT_MS = 3 * 60_000L
 
 /** 把中继消息映射成 HUD 状态(对照 web/app.js)。Transcript 在 MainActivity onMessage 处理。 */
 fun handle(msg: ServerMessage, state: HudState, s: Strings) {
