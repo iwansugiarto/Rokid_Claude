@@ -144,8 +144,12 @@ class MainActivity : ComponentActivity() {
                         matchesPhoto(msg.text, lang) -> openPhoto()
                         matchesLangSwitch(msg.text) -> switchLang(if (lang == "zh") "en" else "zh")
                         else -> {
-                            hud.add("▶ $t", Color(0xFF00AA77)); hud.status = s.submitting; running = true; refreshKeepOn()
-                            client.sendPrompt(t)
+                            hud.add("▶ $t", Color(0xFF00AA77))
+                            if (client.sendPrompt(t)) {
+                                hud.status = s.submitting; running = true; refreshKeepOn()
+                            } else {
+                                hud.status = s.sendFailed   // 连接断了,帧没发出去 —— 明确提示而非静默丢失
+                            }
                         }
                     }
                 } else {

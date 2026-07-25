@@ -43,6 +43,7 @@ data class Strings(
     val photoAttached: String,
     val photoFailed: String,
     val selectSession: String,
+    val sendFailed: String,
 )
 
 private val ZH = Strings(
@@ -63,6 +64,7 @@ private val ZH = Strings(
     photoHint = "单击拍照 · 双击取消",
     photoAttached = "📷 照片已附加 · 说出你的问题", photoFailed = "⚠️ 拍照失败",
     selectSession = "选择会话",
+    sendFailed = "⚠️ 未发送 · 连接断开,请重试",
 )
 
 private val EN = Strings(
@@ -83,6 +85,7 @@ private val EN = Strings(
     photoHint = "tap to shoot · double-tap to cancel",
     photoAttached = "📷 Photo attached · speak your question", photoFailed = "⚠️ Photo failed",
     selectSession = "Select session",
+    sendFailed = "⚠️ Not sent · disconnected, retry",
 )
 
 fun strings(lang: String): Strings = if (lang == "en") EN else ZH

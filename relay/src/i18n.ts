@@ -13,6 +13,7 @@ export interface Tr {
   permDeny: string;
   modelCancel: string;
   sandboxOnly: string;
+  photoExpired: string;
   verb(tool: string): string;
 }
 
@@ -22,6 +23,7 @@ const ZH: Tr = {
   permOnce: '允许一次', permKind: '这类都允许', permDeny: '拒绝',
   modelCancel: '取消',
   sandboxOnly: '⚠️ 此设备仅限沙盒,不能切换到其他项目会话',
+  photoExpired: '⚠️ 照片已过期,请重新拍照',
   verb: (t) => (t === 'Bash' ? '运行' : t === 'Write' || t === 'Edit' ? '写' : t),
 };
 
@@ -31,6 +33,7 @@ const EN: Tr = {
   permOnce: 'Allow once', permKind: 'Allow this kind', permDeny: 'Deny',
   modelCancel: 'Cancel',
   sandboxOnly: '⚠️ This device is sandbox-only; session switch not allowed',
+  photoExpired: '⚠️ Photo expired, take a new one',
   verb: (t) => (t === 'Bash' ? 'Run' : t === 'Write' || t === 'Edit' ? 'Write' : t),
 };
 

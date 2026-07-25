@@ -9,6 +9,16 @@ describe('cleanWhisperOutput', () => {
     expect(cleanWhisperOutput('[BLANK_AUDIO]')).toBe('');
     expect(cleanWhisperOutput('一行\n[BLANK_AUDIO]\n二行')).toBe('一行 二行');
   });
+  it('丢弃圆括号 / 音符等非语音标记行', () => {
+    expect(cleanWhisperOutput('(silence)')).toBe('');
+    expect(cleanWhisperOutput('[ Silence ]')).toBe('');
+    expect(cleanWhisperOutput('(wind blowing)')).toBe('');
+    expect(cleanWhisperOutput('♪ ♪')).toBe('');
+    expect(cleanWhisperOutput('(music)\ntake photo\n[BLANK_AUDIO]')).toBe('take photo');
+  });
+  it('不误伤含括号的正常句子', () => {
+    expect(cleanWhisperOutput('open the file (the new one)')).toBe('open the file (the new one)');
+  });
   it('空 → 空', () => {
     expect(cleanWhisperOutput('')).toBe('');
     expect(cleanWhisperOutput('\n  \n')).toBe('');

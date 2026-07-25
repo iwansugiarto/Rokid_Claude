@@ -100,6 +100,52 @@ describe('photo attach', () => {
     await new Promise<void>((r) => srv.http.close(() => r()));
   });
 
+  it('expires a stale pending photo instead of attaching it', async () => {
+    const { srv, prompts } = makeServer();
+    await new Promise<void>((r) => srv.http.listen(0, r));
+    const port = (srv.http.address() as any).port;
+    const ws = await connect(port);
+    ws.send(JSON.stringify({ type: 'hello', lang: 'en' }));
+
+    ws.send(JSON.stringify({ type: 'photo', jpeg: Buffer.from('x').toString('base64') }));
+    await waitFor(ws, 'photoAck');
+
+    // 快进系统时间 4 分钟(> PHOTO_TTL_MS 3 分钟)
+    const realNow = Date.now;
+    Date.now = () => realNow() + 4 * 60_000;
+    try {
+      ws.send(JSON.stringify({ type: 'prompt', prompt: 'what is this?' }));
+      const notice = await waitFor(ws, 'transcript');
+      expect(notice.text).toMatch(/expired/i);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(prompts).toHaveLength(0);   // 过期照片不触发 run
+    } finally {
+      Date.now = realNow;
+    }
+
+    ws.close();
+    await new Promise<void>((r) => srv.http.close(() => r()));
+  });
+
+  it('keeps at most PHOTO_KEEP photos on disk', async () => {
+    const { readdir } = await import('node:fs/promises');
+    const { srv, dir } = makeServer();
+    await new Promise<void>((r) => srv.http.listen(0, r));
+    const port = (srv.http.address() as any).port;
+    const ws = await connect(port);
+    ws.send(JSON.stringify({ type: 'hello', lang: 'en' }));
+
+    for (let i = 0; i < 8; i++) {
+      ws.send(JSON.stringify({ type: 'photo', jpeg: Buffer.from(`p${i}`).toString('base64') }));
+      await waitFor(ws, 'photoAck');
+    }
+    const files = (await readdir(join(dir, 'photos'))).filter((f) => f.endsWith('.jpg'));
+    expect(files.length).toBeLessThanOrEqual(5);
+
+    ws.close();
+    await new Promise<void>((r) => srv.http.close(() => r()));
+  });
+
   it('newSession clears a pending photo', async () => {
     const { srv, prompts } = makeServer();
     await new Promise<void>((r) => srv.http.listen(0, r));

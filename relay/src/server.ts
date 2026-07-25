@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile, writeFile, unlink, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, unlink, mkdir, readdir, stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -30,6 +30,23 @@ export interface ServerOptions {
   transcriber?: TranscriberFn;
 }
 
+const PHOTO_TTL_MS = 3 * 60_000;  // 拍照后 3 分钟内不说话则作废
+const PHOTO_KEEP = 5;             // sandbox/photos 只保留最近 5 张
+const MAX_PAYLOAD = 12 * 1024 * 1024;  // 单帧上限(照片 base64 ~8MB;拒绝异常大帧)
+
+/** 把照片目录裁到最近 keep 张,删掉更旧的(有界磁盘占用)。失败静默。 */
+async function prunePhotos(dir: string, keep: number): Promise<void> {
+  try {
+    const files = (await readdir(dir)).filter((f) => f.endsWith('.jpg'));
+    if (files.length <= keep) return;
+    const withTime = await Promise.all(
+      files.map(async (f) => ({ f, t: (await stat(join(dir, f))).mtimeMs })),
+    );
+    withTime.sort((a, b) => b.t - a.t);
+    await Promise.all(withTime.slice(keep).map((x) => unlink(join(dir, x.f)).catch(() => {})));
+  } catch { /* 目录不存在等,忽略 */ }
+}
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -49,7 +66,7 @@ export function createRelayServer(opts: ServerOptions) {
   const broadcast = (msg: unknown) => { for (const send of clients) send(msg); };
 
   let lang: Lang = 'zh';                      // 本连接语言(hello 时由客户端 config 传入)
-  let pendingPhoto: string | null = null;     // 待附加的照片(sandbox 相对路径),下一条 prompt 消费
+  let pendingPhoto: { rel: string; at: number } | null = null;  // 待附加照片(相对路径+时间戳),下一条 prompt 消费;超 TTL 作废
   let activeCwd: string | null = null;        // 选定会话所属项目;之后的 run 都在这里跑(newSession 归位 sandbox)
   let resumeTarget: string | null = null;     // 选定会话 id,仅首个 run 用 --resume 接上,之后走 store 链
   let currentModel: string | null = null;   // 最近一次 system 事件的真实模型(全 id)
@@ -181,7 +198,7 @@ export function createRelayServer(opts: ServerOptions) {
   }
 
   const tokens = { full: opts.tokenFull ?? opts.token, sandbox: opts.tokenSandbox };
-  const wss = new WebSocketServer({ server: http });
+  const wss = new WebSocketServer({ server: http, maxPayload: MAX_PAYLOAD });
   wss.on('connection', (ws, req) => {
     const capability: Capability | null = classifyConnection(req, tokens);
     if (!capability) { ws.close(1008, 'unauthorized'); return; }
@@ -253,7 +270,13 @@ export function createRelayServer(opts: ServerOptions) {
         const dict = opts.dictionaryDir ? loadDictionary(join(opts.dictionaryDir, `dictionary.${lang}.json`)) : {};
         let text = expandPrompt(msg.prompt, dict);
         if (pendingPhoto) {
-          text = `Look at the image file ${pendingPhoto} first, then: ${text}`;
+          if (Date.now() - pendingPhoto.at > PHOTO_TTL_MS) {
+            // 拍了照却隔太久才说话:作废,不静默粘到无关的 prompt 上
+            pendingPhoto = null;
+            send({ type: 'transcript', text: tr(lang).photoExpired });
+            return;
+          }
+          text = `Look at the image file ${pendingPhoto.rel} first, then: ${text}`;
           pendingPhoto = null;
         }
         void startRun(text);
@@ -265,10 +288,11 @@ export function createRelayServer(opts: ServerOptions) {
           try {
             const dir = join(opts.sandboxDir, 'photos');
             await mkdir(dir, { recursive: true });
-            const name = `photo-${Date.now()}.jpg`;
-            await writeFile(join(dir, name), Buffer.from(jpeg, 'base64'));
-            pendingPhoto = `./photos/${name}`;
-            send({ type: 'photoAck', file: pendingPhoto });
+            const rel = `./photos/photo-${Date.now()}.jpg`;
+            await writeFile(join(opts.sandboxDir, rel), Buffer.from(jpeg, 'base64'));
+            pendingPhoto = { rel, at: Date.now() };
+            await prunePhotos(dir, PHOTO_KEEP);   // 有界:只留最近 N 张,刚写的最新故安全
+            send({ type: 'photoAck', file: rel });
           } catch {
             send({ type: 'photoAck', file: '' });
           }

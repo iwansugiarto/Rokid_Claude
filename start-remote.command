@@ -34,6 +34,6 @@ trap 'kill $NGROK_PID 2>/dev/null' EXIT
 sleep 2
 echo "✓ ngrok 已拨出 (PID $NGROK_PID,日志 /tmp/rokid-ngrok.log)"
 
-# 起中继(前台,带 token);本窗口 Ctrl+C 即同时停 ngrok
+# 起中继(前台);token 已由上面 `set -a; . .remote.env` 导出(含可选的 ROKID_SANDBOX_TOKEN)。
 echo "▶ 启动中继… 看到 '鉴权: 已开启' 即就绪。用完按 Ctrl+C。"
-cd relay && ROKID_TOKEN="$ROKID_TOKEN" npm run dev
+cd relay && npm run dev

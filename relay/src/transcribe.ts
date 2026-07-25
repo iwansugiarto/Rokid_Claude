@@ -1,12 +1,15 @@
 import { spawn } from 'node:child_process';
 import { tr, type Lang } from './i18n';
 
-/** 清洗 whisper-cli 输出:去方括号行(如 [BLANK_AUDIO])、trim、压缩空白。纯函数。 */
+// 整行仅为非语音标记则丢弃:[BLANK_AUDIO]/[ Silence ]、(silence)/(wind blowing)、♪…♪ 或纯音符。
+const NONSPEECH_LINE = /^(\[.*\]|\(.*\)|[♪♫\s]+)$/;
+
+/** 清洗 whisper-cli 输出:去非语音标记行、trim、压缩空白。纯函数。 */
 export function cleanWhisperOutput(raw: string): string {
   return raw
     .split('\n')
     .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !/^\[.*\]$/.test(l))
+    .filter((l) => l.length > 0 && !NONSPEECH_LINE.test(l))
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();

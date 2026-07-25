@@ -35,12 +35,13 @@ class RelayClient(
     fun resume() = transport.resume()
     fun close() = transport.close()
 
-    private fun send(json: String) { transport.sendRaw(json) }
+    private fun send(json: String): Boolean = transport.sendRaw(json)
 
-    fun sendPrompt(prompt: String) {
+    /** @return false 若连接已断(帧没发出去)—— 调用方据此提示用户,不再静默丢失。 */
+    fun sendPrompt(prompt: String): Boolean {
         val p = prompt.trim()
-        if (p.isEmpty()) return
-        send(JSONObject().put("type", "prompt").put("prompt", p).toString())
+        if (p.isEmpty()) return true
+        return send(JSONObject().put("type", "prompt").put("prompt", p).toString())
     }
     fun sendAudio(wavBase64: String) {
         send(JSONObject().put("type", "audio").put("wav", wavBase64).toString())
