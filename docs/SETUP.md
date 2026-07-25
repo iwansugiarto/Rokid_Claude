@@ -73,12 +73,23 @@ ngrok tunnel.
    cp relay/.remote.env.example relay/.remote.env
    ```
    Fill in:
-   - `ROKID_TOKEN` — a long random secret, e.g. `openssl rand -hex 24`.
+   - `ROKID_TOKEN` — a long random secret, e.g. `openssl rand -hex 24`. This is
+     the **full** token: a connection holding it can use the voice session
+     picker to resume Claude Code sessions in *any* recent project. Give it only
+     to clients you trust (the Mac's local web mirror, a desktop).
+   - `ROKID_SANDBOX_TOKEN` — *(optional, recommended for glasses)* a second
+     secret. A connection holding it is **sandbox-only**: it runs in
+     `relay/sandbox` and cannot switch to other projects' sessions. Give this to
+     low-trust devices like the glasses. Leave empty to disable the two-tier
+     split (then any valid token is full).
    - `NGROK_DOMAIN` — your fixed ngrok domain (without the protocol), e.g.
      `your-subdomain.ngrok-free.dev`.
 3. **Point the client at the tunnel.** In `config.json` set
-   `"serverUrl": "wss://<your-ngrok-domain>"` and `"token": "<same ROKID_TOKEN>"`,
-   then push it (same `adb push` command as above).
+   `"serverUrl": "wss://<your-ngrok-domain>"` and `"token": "<ROKID_SANDBOX_TOKEN
+   for glasses, or ROKID_TOKEN for a trusted client>"`, then push it (same
+   `adb push` command as above). The Android client sends the token in an
+   `Authorization: Bearer` header, so it never appears in reverse-proxy access
+   logs.
 4. **Start the remote stack:**
    ```bash
    ./start-remote.command
@@ -89,10 +100,13 @@ ngrok tunnel.
 
 ### Security
 
-The `ROKID_TOKEN` is equivalent to remote code execution on your Mac: anyone who
-reaches the tunnel with it can make Claude Code run commands. Never commit
-`relay/.remote.env` or your real `config.json` (both are gitignored). The
-on-glasses permission confirmation for risky tools is your second line of
+The `ROKID_TOKEN` (full) is equivalent to remote code execution on your Mac:
+anyone who reaches the tunnel with it can make Claude Code run commands in any
+recent project. Prefer giving the glasses the sandbox token
+(`ROKID_SANDBOX_TOKEN`) so a lost/borrowed pair is confined to the sandbox and
+cannot reach your other projects. Never commit `relay/.remote.env` or your real
+`config.json` (both are gitignored). The on-glasses permission confirmation for
+risky tools is your second line of
 defense.
 
 ## Connecting the glasses to Wi-Fi / a phone hotspot

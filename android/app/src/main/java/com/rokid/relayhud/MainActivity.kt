@@ -118,7 +118,8 @@ class MainActivity : ComponentActivity() {
         hud.status = s.ready
         hud.statusline = statuslineText(null, 0.0, 0L, s)
         client = RelayClient(
-            url = buildWsUrl(cfg.serverUrl, cfg.token),
+            url = cfg.serverUrl,
+            token = cfg.token,
             lang = lang,
             onMessage = { msg ->
                 if (msg is ServerMessage.Usage) {

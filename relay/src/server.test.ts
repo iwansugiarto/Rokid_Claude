@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createRelayServer } from './server';
 
 /** 起一个 relay,注入会记录被调语言的假转写器和记录调用参数的空跑 runner。 */
-function makeServer(projectsDir?: string) {
+function makeServer(projectsDir?: string, auth?: { tokenFull?: string; tokenSandbox?: string }) {
   const langSeen: string[] = [];
   const prompts: string[] = [];
   const calls: Array<{ prompt: string; cwd: string; sessionId?: string }> = [];
@@ -17,7 +17,7 @@ function makeServer(projectsDir?: string) {
   const dir = mkdtempSync(join(tmpdir(), 'rokid-test-'));
   const srv = createRelayServer({
     sandboxDir: dir, webDir: dir, stateDir: dir, modelPath: 'unused',
-    projectsDir,
+    projectsDir, ...auth,
     transcriber,
     runner: (o) => {
       prompts.push(o.prompt);
@@ -28,9 +28,11 @@ function makeServer(projectsDir?: string) {
   return { srv, langSeen, prompts, calls, dir };
 }
 
-function connect(port: number): Promise<WebSocket> {
+function connect(port: number, token?: string): Promise<WebSocket> {
   return new Promise((resolve) => {
-    const ws = new WebSocket(`ws://localhost:${port}`);
+    const ws = token
+      ? new WebSocket(`ws://localhost:${port}`, { headers: { authorization: `Bearer ${token}` } })
+      : new WebSocket(`ws://localhost:${port}`);
     ws.on('open', () => resolve(ws));
   });
 }
@@ -156,6 +158,67 @@ describe('session picker', () => {
     expect(calls[1].sessionId).toBeUndefined();
 
     ws.close();
+    await new Promise<void>((r) => srv.http.close(() => r()));
+  });
+});
+
+describe('capability gating', () => {
+  async function withProjects() {
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const projects = mkdtempSync(join(tmpdir(), 'rokid-proj-'));
+    const pdir = join(projects, '-Users-x-app');
+    mkdirSync(pdir, { recursive: true });
+    writeFileSync(join(pdir, 'sess-1.jsonl'),
+      JSON.stringify({ type: 'user', cwd: '/Users/x/app', message: { role: 'user', content: 'fix login bug' } }) + '\n');
+    return projects;
+  }
+
+  it('sandbox token cannot open the session picker; run stays in sandbox', async () => {
+    const projects = await withProjects();
+    const { srv, calls, dir } = makeServer(projects, { tokenFull: 'F', tokenSandbox: 'S' });
+    await new Promise<void>((r) => srv.http.listen(0, r));
+    const port = (srv.http.address() as any).port;
+    const ws = await connect(port, 'S');
+    ws.send(JSON.stringify({ type: 'hello', lang: 'en' }));
+
+    ws.send(JSON.stringify({ type: 'prompt', prompt: 'list sessions' }));
+    const notice = await waitFor(ws, 'transcript');
+    expect(notice.text).toMatch(/sandbox-only/i);
+
+    // 逃逸被挡后普通 prompt 仍在 sandbox 跑
+    ws.send(JSON.stringify({ type: 'prompt', prompt: 'do work here' }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cwd).toBe(dir);
+
+    ws.close();
+    await new Promise<void>((r) => srv.http.close(() => r()));
+  });
+
+  it('full token can still open the picker', async () => {
+    const projects = await withProjects();
+    const { srv } = makeServer(projects, { tokenFull: 'F', tokenSandbox: 'S' });
+    await new Promise<void>((r) => srv.http.listen(0, r));
+    const port = (srv.http.address() as any).port;
+    const ws = await connect(port, 'F');
+    ws.send(JSON.stringify({ type: 'hello', lang: 'en' }));
+    ws.send(JSON.stringify({ type: 'prompt', prompt: 'list sessions' }));
+    const req = await waitFor(ws, 'sessionRequest');
+    expect(req.options.some((o: string) => o.includes('fix login bug'))).toBe(true);
+    ws.close();
+    await new Promise<void>((r) => srv.http.close(() => r()));
+  });
+
+  it('wrong token is rejected at handshake', async () => {
+    const { srv } = makeServer(undefined, { tokenFull: 'F' });
+    await new Promise<void>((r) => srv.http.listen(0, r));
+    const port = (srv.http.address() as any).port;
+    const closed = await new Promise<number>((resolve) => {
+      const ws = new WebSocket(`ws://localhost:${port}`, { headers: { authorization: 'Bearer nope' } });
+      ws.on('close', (code) => resolve(code));
+      ws.on('error', () => {});
+    });
+    expect(closed).toBe(1008);
     await new Promise<void>((r) => srv.http.close(() => r()));
   });
 });

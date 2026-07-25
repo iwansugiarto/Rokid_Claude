@@ -54,8 +54,13 @@ web page.
   commands (`relay/dictionary.<lang>.json`, editable live).
 - **`model.ts`** — detects a "switch model" intent in a transcript and maps a
   model alias to a `claude --model` argument.
-- **`auth.ts`** — validates the `?token=` query parameter on the WebSocket
-  upgrade.
+- **`auth.ts`** — `classifyConnection` grades each WebSocket upgrade to a
+  capability: `full` (may use the session picker to resume any recent project),
+  `sandbox` (confined to `relay/sandbox`), or rejected. It reads the token from
+  `Authorization: Bearer` → `Sec-WebSocket-Protocol` → `?token=` (in that order),
+  matching it against `ROKID_TOKEN` (full) and `ROKID_SANDBOX_TOKEN` (sandbox).
+  Give the glasses the sandbox token so a low-trust device can't leave the
+  sandbox; the cross-project escape is gated on `full` in `server.ts`.
 
 ### Android client — `android/app/src/main/java/com/rokid/relayhud/`
 
@@ -66,8 +71,16 @@ web page.
 - **`Protocol.kt`** — parses server→client messages (kotlinx.serialization).
 - **`VoiceInput` / `SilenceDetector`** — microphone capture (AudioRecord) plus
   voice-activity detection to auto-stop on silence.
-- **`Gestures` / `ChoiceState` / `RelayClient` / `Config`** — pure gesture
-  mapping, choice-overlay state, the OkHttp WebSocket client, and config parsing.
+- **`Gestures` / `ChoiceState` / `Config`** — pure gesture mapping,
+  choice-overlay state, and config parsing.
+- **`RelayClient` / `RelayTransport` / `WebSocketTransport`** — `RelayClient`
+  is the typed high-level API (sendPrompt/sendAudio/sendPhoto/…, plus the `hello`
+  handshake). It talks only to a `RelayTransport` interface; `WebSocketTransport`
+  is the OkHttp implementation (60s keepalive, idle pause/resume, token in an
+  `Authorization` header). A future **`WifiDirectTransport`** would implement the
+  same interface — letting the glasses run as a pure I/O peripheral bridged
+  through a phone companion that holds the full token — without touching
+  `RelayClient` or `MainActivity`.
 - **`ScannerActivity` + `WifiQr` / `ConfigQr`** — a CameraX + ZXing QR scanner
   (reachable by single-tap when offline) that provisions Wi-Fi (`WIFI:` codes →
   `ACTION_WIFI_ADD_NETWORKS`) or writes `config.json` (`RCLAUDE:` config codes →
@@ -113,8 +126,8 @@ run without prompting.
 ## Remote access
 
 For use outside the home, an [ngrok](https://ngrok.com) tunnel exposes the local
-relay (`:8787`) on a fixed domain over TLS. The relay requires a shared token
-(`?token=`) on every connection.
+relay (`:8787`) on a fixed domain over TLS. The relay requires a token on every
+connection, graded to full or sandbox capability (see `auth.ts` above).
 
 **Security:** that token is equivalent to remote code execution on your Mac —
 anyone who can reach the tunnel with the token can make Claude Code run commands.

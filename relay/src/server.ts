@@ -6,7 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { runClaude, type RunHandle } from './claude-runner';
 import { RunStore } from './run-store';
 import { transcribe } from './transcribe';
-import { checkToken } from './auth';
+import { classifyConnection, type Capability } from './auth';
 import { decide, summarize } from './permission';
 import { expandPrompt, loadDictionary } from './dictionary';
 import { parseModelCommand, modelArg, type ModelAlias } from './model';
@@ -21,7 +21,9 @@ export interface ServerOptions {
   webDir: string;
   stateDir: string;
   modelPath: string;
-  token?: string;
+  token?: string;         // 兼容旧调用:等价 tokenFull
+  tokenFull?: string;     // 全权 token(可用会话选择器,跨项目)
+  tokenSandbox?: string;  // 受限 token(只能 sandbox,眼镜低信任路径用这个)
   dictionaryDir?: string;
   projectsDir?: string;   // ~/.claude/projects;不传则禁用会话切换
   runner?: RunnerFn;
@@ -178,9 +180,11 @@ export function createRelayServer(opts: ServerOptions) {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'transcript', text }));
   }
 
+  const tokens = { full: opts.tokenFull ?? opts.token, sandbox: opts.tokenSandbox };
   const wss = new WebSocketServer({ server: http });
   wss.on('connection', (ws, req) => {
-    if (!checkToken(req.url, opts.token)) { ws.close(1008, 'unauthorized'); return; }
+    const capability: Capability | null = classifyConnection(req, tokens);
+    if (!capability) { ws.close(1008, 'unauthorized'); return; }
     const send = (msg: unknown) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); };
     clients.add(send);
     const sentMax = new Map<string, number>();
@@ -229,6 +233,8 @@ export function createRelayServer(opts: ServerOptions) {
       }
       if (msg.type === 'prompt' && msg.prompt) {
         if (opts.projectsDir && parseSessionCommand(msg.prompt, lang)) {
+          // 只有全权连接能跨项目;sandbox 连接(眼镜低信任路径)被挡在 sandbox 内
+          if (capability !== 'full') { send({ type: 'transcript', text: tr(lang).sandboxOnly }); return; }
           const sessions = listRecentSessions(opts.projectsDir, { excludeCwd: opts.sandboxDir });
           void requestSessionChoice(sessions).then((s) => {
             if (!s) return;

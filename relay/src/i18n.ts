@@ -12,6 +12,7 @@ export interface Tr {
   permKind: string;
   permDeny: string;
   modelCancel: string;
+  sandboxOnly: string;
   verb(tool: string): string;
 }
 
@@ -20,6 +21,7 @@ const ZH: Tr = {
   whisperPrompt: '以下是普通话句子的简体中文转写。',
   permOnce: '允许一次', permKind: '这类都允许', permDeny: '拒绝',
   modelCancel: '取消',
+  sandboxOnly: '⚠️ 此设备仅限沙盒,不能切换到其他项目会话',
   verb: (t) => (t === 'Bash' ? '运行' : t === 'Write' || t === 'Edit' ? '写' : t),
 };
 
@@ -28,6 +30,7 @@ const EN: Tr = {
   whisperPrompt: null,
   permOnce: 'Allow once', permKind: 'Allow this kind', permDeny: 'Deny',
   modelCancel: 'Cancel',
+  sandboxOnly: '⚠️ This device is sandbox-only; session switch not allowed',
   verb: (t) => (t === 'Bash' ? 'Run' : t === 'Write' || t === 'Edit' ? 'Write' : t),
 };
 
