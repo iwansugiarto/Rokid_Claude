@@ -40,5 +40,6 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.4")
     implementation("androidx.camera:camera-view:1.3.4")
     implementation("com.google.zxing:core:3.5.3")
+    implementation("org.java-websocket:Java-WebSocket:1.5.7")   // bridge 模式:手机本地 WS 服务
     testImplementation("junit:junit:4.13.2")
 }

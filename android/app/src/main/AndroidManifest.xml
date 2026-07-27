@@ -26,5 +26,9 @@
         <activity
             android:name=".PhotoActivity"
             android:exported="false" />
+        <activity
+            android:name=".BridgeActivity"
+            android:exported="false"
+            android:label="Rokid Claude Bridge" />
     </application>
 </manifest>

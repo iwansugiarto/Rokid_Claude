@@ -107,6 +107,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // bridge 模式(手机 companion):不走眼镜 HUD 流程,转到 BridgeActivity 起本地代理
+        if (loadConfig().mode == "bridge") {
+            startActivity(Intent(this, BridgeActivity::class.java))
+            finish(); return
+        }
         audioGranted.value =
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
@@ -350,8 +355,9 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         idler.removeCallbacksAndMessages(null)
-        client.close()
-        voice.destroy()
+        // bridge 模式会在 onCreate 里提前 finish(),client/voice 尚未初始化 —— 别碰
+        if (::client.isInitialized) client.close()
+        if (::voice.isInitialized) voice.destroy()
     }
 }
 
