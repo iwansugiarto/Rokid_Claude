@@ -1,5 +1,6 @@
 package com.rokid.relayhud
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,14 +24,9 @@ import java.net.NetworkInterface
  * 本机可被眼镜连接的地址、上游中继、已连眼镜数。手机有大屏,信息一目了然。
  */
 class BridgeActivity : ComponentActivity() {
-    // 进程级单例:Activity 重建(旋转/回收)不重启服务器,否则会踢掉眼镜连接
-    companion object {
-        @Volatile private var shared: BridgeServer? = null
-        @Volatile var clientCount = 0
-        @Volatile var upstreamOk = false
-    }
     private val clients = mutableIntStateOf(0)
     private val upOk = mutableStateOf(false)
+    private val sttReady = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,13 +34,18 @@ class BridgeActivity : ComponentActivity() {
         val cfg = loadAppConfig(this)
         val ip = localIp() ?: "?"
 
-        // 只在首次创建时起服务器;之后的 Activity 重建复用同一个实例
-        clients.intValue = clientCount; upOk.value = upstreamOk
-        if (shared == null) {
-            shared = BridgeServer(cfg.bridgePort, cfg.serverUrl, cfg.token) { n, ok ->
-                clientCount = n; upstreamOk = ok
-                runOnUiThread { clients.intValue = n; upOk.value = ok }
-            }.also { it.isReuseAddr = true; it.start() }
+        // 本地转写需要麦克风权限(即使音频来自眼镜,系统识别器仍要求该权限)
+        if (PhoneStt(this).available() &&
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 1)
+        }
+        // 桥跑在前台服务里:退后台/息屏继续转发。本页只是状态显示。
+        startForegroundService(Intent(this, BridgeService::class.java))
+        clients.intValue = BridgeService.clientCount
+        upOk.value = BridgeService.upstreamOk
+        sttReady.value = BridgeService.sttOn
+        BridgeService.onStat = { n, ok ->
+            runOnUiThread { clients.intValue = n; upOk.value = ok; sttReady.value = BridgeService.sttOn }
         }
 
         setContent {
@@ -60,15 +61,19 @@ class BridgeActivity : ComponentActivity() {
                 Text(if (ok) "● upstream terhubung" else "○ upstream menunggu…",
                     color = if (ok) Color(0xFF00FF88) else Color(0xFFFFAA33), fontSize = 15.sp)
                 Text("眼镜已连 / glasses connected: $n", color = Color(0xFF00FF88), fontSize = 15.sp)
+                Text(
+                    if (sttReady.value) "🎙 STT on-device: aktif (audio tak lewat seluler)"
+                    else "🎙 STT on-device: tak tersedia (audio diteruskan ke relay)",
+                    color = if (sttReady.value) Color(0xFF00FF88) else Color(0xFFFFAA33), fontSize = 13.sp,
+                )
             }
         }
     }
 
-    // 注意:不在 onDestroy 关服务器 —— 桥要在 Activity 重建/息屏后继续替眼镜转发。
-    // 需要停止时由用户显式退出(返回键 finishAndRemoveTask)。
+    // 桥归前台服务管,关本页不影响转发;用通知里的 Stop 才真正停桥。
     override fun onDestroy() {
         super.onDestroy()
-        if (isFinishing) { shared?.shutdown(); shared = null; clientCount = 0; upstreamOk = false }
+        BridgeService.onStat = null
     }
 
     private fun localIp(): String? =

@@ -25,6 +25,8 @@ class BridgeServer(
     port: Int,
     private val upstreamUrl: String,
     private val token: String,
+    private val stt: PhoneStt? = null,        // 有则手机本地转写,只上送文本
+    private val lang: String = "en",          // 转写语言(眼镜的 audio 帧不带 lang)
     private val onStat: (clients: Int, upOk: Boolean) -> Unit,
 ) : WebSocketServer(InetSocketAddress(port)) {
 
@@ -56,7 +58,38 @@ class BridgeServer(
     }
 
     override fun onMessage(down: DownWs, message: String) {
+        // audio 帧:能在手机本地转写就别把 WAV 推过蜂窝 —— 只上送转写后的文本
+        if (stt != null && stt.available() && message.contains("\"type\":\"audio\"")) {
+            if (interceptAudio(down, message)) return
+        }
         upstreams[down]?.send(message)                    // 眼镜→上游
+    }
+
+    /** @return true=已接管(本地转写中);false=解析失败,交回原路转发。 */
+    private fun interceptAudio(down: DownWs, message: String): Boolean {
+        val wavB64 = try {
+            org.json.JSONObject(message).optString("wav").takeIf { it.isNotEmpty() } ?: return false
+        } catch (_: Exception) { return false }
+
+        val wav = try {
+            android.util.Base64.decode(wavB64, android.util.Base64.NO_WRAP)
+        } catch (_: Exception) { return false }
+
+        val t0 = System.currentTimeMillis()
+        stt!!.transcribe(wav, lang) { text ->
+            val ms = System.currentTimeMillis() - t0
+            if (text.isNullOrBlank()) {
+                // 本地识别失败 → 回退:把原始音频交给中继的 whisper(功能不降级)
+                Log.i(TAG, "stt fallback → upstream (wav ${wav.size}B, ${ms}ms)")
+                upstreams[down]?.send(message)
+            } else {
+                Log.i(TAG, "stt local ok: ${wav.size}B wav → ${text.length} chars in ${ms}ms (cellular saved ~${wav.size / 1024}KB)")
+                // 眼镜按协议期待 transcript(HUD 显示听到了什么),它再自行决定发 prompt
+                if (down.isOpen) down.send(org.json.JSONObject()
+                    .put("type", "transcript").put("text", text).put("sttMs", ms).toString())
+            }
+        }
+        return true
     }
 
     override fun onClose(down: DownWs, code: Int, reason: String, remote: Boolean) {
