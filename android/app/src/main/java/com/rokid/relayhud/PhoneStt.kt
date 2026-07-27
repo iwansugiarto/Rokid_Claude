@@ -55,15 +55,35 @@ class PhoneStt(private val context: Context) {
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, android.media.AudioFormat.ENCODING_PCM_16BIT)
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, 16000)
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
+            // 喂文件/管道音频时必须开分段会话,否则结果不走 onResults(实测:会话正常结束但拿到空)
+            putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE)
         }
 
+        // 分段会话:结果通过 onSegmentResults 累积,onEndOfSegmentedSession 才算完
+        val segments = StringBuilder()
+        fun pick(b: Bundle): String? =
+            b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.takeIf { it.isNotBlank() }
+
         rec.setRecognitionListener(object : RecognitionListener {
+            override fun onSegmentResults(results: Bundle) {
+                pick(results)?.let { if (segments.isNotEmpty()) segments.append(' '); segments.append(it) }
+            }
+            override fun onEndOfSegmentedSession() {
+                Log.i(TAG, "on-device segmented done chars=${segments.length}")
+                finish(segments.toString().ifBlank { null })
+            }
             override fun onResults(results: Bundle) {
-                val text = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                // 非分段模式的回退路径(某些识别器仍走这里)
+                val text = pick(results) ?: segments.toString().ifBlank { null }
                 Log.i(TAG, "on-device result chars=${text?.length ?: -1}")
                 finish(text)
             }
-            override fun onError(error: Int) { Log.w(TAG, "on-device error=$error"); finish(null) }
+            override fun onError(error: Int) {
+                // 分段模式下已有结果时,收尾错误不该丢弃已识别文本
+                val partial = segments.toString().ifBlank { null }
+                Log.w(TAG, "on-device error=$error (kept chars=${partial?.length ?: 0})")
+                finish(partial)
+            }
             override fun onReadyForSpeech(p: Bundle?) {}
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(v: Float) {}
@@ -88,6 +108,10 @@ class PhoneStt(private val context: Context) {
                         i += n
                         Thread.sleep(80)                // 略快于实时,兼顾时延与识别稳定
                     }
+                    // 尾部补 600ms 静音:管道一断识别器就收尾,否则最后一个词会被截掉
+                    // (实测:"list files in this folder" 只回 "…this fold")
+                    val silence = ByteArray(chunk)
+                    repeat(6) { out.write(silence); out.flush(); Thread.sleep(80) }
                 }
             } catch (e: Exception) { Log.w(TAG, "pipe write: ${e.message}") }
         }.start()
