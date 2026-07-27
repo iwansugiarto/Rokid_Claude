@@ -29,6 +29,8 @@
         <activity
             android:name=".BridgeActivity"
             android:exported="false"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:label="Rokid Claude Bridge" />
     </application>
 </manifest>

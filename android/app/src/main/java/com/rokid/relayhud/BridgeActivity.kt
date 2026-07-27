@@ -23,7 +23,12 @@ import java.net.NetworkInterface
  * 本机可被眼镜连接的地址、上游中继、已连眼镜数。手机有大屏,信息一目了然。
  */
 class BridgeActivity : ComponentActivity() {
-    private var server: BridgeServer? = null
+    // 进程级单例:Activity 重建(旋转/回收)不重启服务器,否则会踢掉眼镜连接
+    companion object {
+        @Volatile private var shared: BridgeServer? = null
+        @Volatile var clientCount = 0
+        @Volatile var upstreamOk = false
+    }
     private val clients = mutableIntStateOf(0)
     private val upOk = mutableStateOf(false)
 
@@ -33,9 +38,14 @@ class BridgeActivity : ComponentActivity() {
         val cfg = loadAppConfig(this)
         val ip = localIp() ?: "?"
 
-        server = BridgeServer(cfg.bridgePort, cfg.serverUrl, cfg.token) { n, ok ->
-            runOnUiThread { clients.intValue = n; upOk.value = ok }
-        }.also { it.isReuseAddr = true; it.start() }
+        // 只在首次创建时起服务器;之后的 Activity 重建复用同一个实例
+        clients.intValue = clientCount; upOk.value = upstreamOk
+        if (shared == null) {
+            shared = BridgeServer(cfg.bridgePort, cfg.serverUrl, cfg.token) { n, ok ->
+                clientCount = n; upstreamOk = ok
+                runOnUiThread { clients.intValue = n; upOk.value = ok }
+            }.also { it.isReuseAddr = true; it.start() }
+        }
 
         setContent {
             val n by clients
@@ -54,9 +64,11 @@ class BridgeActivity : ComponentActivity() {
         }
     }
 
+    // 注意:不在 onDestroy 关服务器 —— 桥要在 Activity 重建/息屏后继续替眼镜转发。
+    // 需要停止时由用户显式退出(返回键 finishAndRemoveTask)。
     override fun onDestroy() {
         super.onDestroy()
-        server?.shutdown()
+        if (isFinishing) { shared?.shutdown(); shared = null; clientCount = 0; upstreamOk = false }
     }
 
     private fun localIp(): String? =

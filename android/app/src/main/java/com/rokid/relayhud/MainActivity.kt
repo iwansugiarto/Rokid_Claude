@@ -109,7 +109,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // bridge 模式(手机 companion):不走眼镜 HUD 流程,转到 BridgeActivity 起本地代理
         if (loadConfig().mode == "bridge") {
-            startActivity(Intent(this, BridgeActivity::class.java))
+            // SINGLE_TOP|CLEAR_TOP:复用已在前台的桥页,避免反复重建(重建会重启服务器、踢掉眼镜)
+            startActivity(Intent(this, BridgeActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP))
             finish(); return
         }
         audioGranted.value =
