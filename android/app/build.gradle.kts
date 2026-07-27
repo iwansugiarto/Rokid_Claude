@@ -17,7 +17,14 @@ android {
         versionName = "0.1"
     }
     buildTypes {
-        getByName("release") { isMinifyEnabled = false }
+        getByName("release") {
+            // 侧载自用:R8 精简 + 资源收缩(debug 37MB → release 明显更小、启动更快)
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // 无发布密钥库时用 debug 签名,保证 adb install 可直接装(自用侧载,不上架)
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
