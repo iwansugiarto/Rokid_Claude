@@ -28,7 +28,7 @@ sealed interface ServerMessage {
     data class Sync(val sessionId: String?, val currentRun: RunSummary?) : ServerMessage
     data class Event(val runId: String, val seq: Int, val event: AgentEvent) : ServerMessage
     data class RunEnd(val runId: String, val status: String) : ServerMessage
-    data class Transcript(val text: String) : ServerMessage
+    data class Transcript(val text: String, val sttMs: Long = 0) : ServerMessage
     data class PermissionRequest(val id: String, val summary: String, val options: List<String>, val allowKey: String, val timeoutChoice: String) : ServerMessage
     data class Usage(val model: String?, val costUsd: Double, val tokens: Long) : ServerMessage
     data class ModelRequest(val id: String, val options: List<String>, val current: Int, val timeoutChoice: String) : ServerMessage
@@ -84,7 +84,7 @@ fun parseServerMessage(text: String): ServerMessage = try {
             event = parseEvent((o["event"] as? JsonObject) ?: JsonObject(emptyMap()))
         )
         "runEnd" -> ServerMessage.RunEnd(o.str("runId") ?: "", o.str("status") ?: "")
-        "transcript" -> ServerMessage.Transcript(o.str("text") ?: "")
+        "transcript" -> ServerMessage.Transcript(o.str("text") ?: "", o.lng("sttMs") ?: 0)
         "permissionRequest" -> {
             val opts = (o["options"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
             ServerMessage.PermissionRequest(o.str("id") ?: "", o.str("summary") ?: "", opts, o.str("allowKey") ?: "", o.str("timeoutChoice") ?: (opts.lastOrNull() ?: ""))

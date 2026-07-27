@@ -133,6 +133,7 @@ class MainActivity : ComponentActivity() {
                 } else if (msg is ServerMessage.PhotoAck) {
                     hud.status = if (msg.file.isEmpty()) s.photoFailed else s.photoAttached
                 } else if (msg is ServerMessage.Transcript) {
+                    Metrics.onTranscript(msg.text.length, msg.sttMs)
                     val t = msg.text.trim().trim('。', '，', '!', '！', '.', ' ')
                     when {
                         t.isEmpty() -> hud.status = s.noSpeech
@@ -146,6 +147,7 @@ class MainActivity : ComponentActivity() {
                         else -> {
                             hud.add("▶ $t", Color(0xFF00AA77))
                             if (client.sendPrompt(t)) {
+                                Metrics.onPromptSent()
                                 hud.status = s.submitting; running = true; refreshKeepOn()
                             } else {
                                 hud.status = s.sendFailed   // 连接断了,帧没发出去 —— 明确提示而非静默丢失
@@ -153,7 +155,8 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 } else {
-                    if (msg is ServerMessage.RunEnd) { running = false; refreshKeepOn() }
+                    if (msg is ServerMessage.Event && msg.event is AgentEvent.Text) Metrics.onFirstText()
+                    if (msg is ServerMessage.RunEnd) { running = false; refreshKeepOn(); Metrics.onRunEnd() }
                     handle(msg, hud, s)
                 }
             },
@@ -163,7 +166,7 @@ class MainActivity : ComponentActivity() {
 
         voice = VoiceInput(
             context = this,
-            onAudio = { b64 -> recording = false; hud.recording = false; hud.status = s.transcribing; refreshKeepOn(); client.sendAudio(b64) },
+            onAudio = { b64 -> recording = false; hud.recording = false; hud.status = s.transcribing; refreshKeepOn(); Metrics.onAudioSent(b64.length); client.sendAudio(b64) },
             onError = { recording = false; hud.recording = false; hud.status = it; refreshKeepOn() },
         )
 

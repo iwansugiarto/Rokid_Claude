@@ -166,9 +166,13 @@ export function createRelayServer(opts: ServerOptions) {
     resumeTarget = null;   // 只在接上会话的首个 run 用;之后 store 链会跟着 system 事件走
     const handle = runner({ prompt, cwd: activeCwd ?? opts.sandboxDir, sessionId: resumeId, model: selectedModel ? modelArg(selectedModel) : undefined });
     current = handle;
+    const runStart = Date.now();
+    let firstTextAt = 0;
+    let respChars = 0;
     try {
       for await (const event of handle.events) {
         store.appendEvent(run.id, event);
+        if (event.type === 'text') { if (!firstTextAt) firstTextAt = Date.now(); respChars += (event.delta?.length ?? 0); }
         if (event.type === 'system' && event.model) { currentModel = event.model; broadcastUsage(); }
         if (event.type === 'done') {
           if (typeof event.costUsd === 'number') sessionCostUsd += event.costUsd;
@@ -178,6 +182,8 @@ export function createRelayServer(opts: ServerOptions) {
       }
       const last = store.eventsSince(run.id, 0).at(-1)?.event;
       store.finishRun(run.id, last?.type === 'error' ? 'error' : 'done');
+      const now = Date.now();
+      process.stderr.write(`[timing] run firstTokenMs=${firstTextAt ? firstTextAt - runStart : -1} totalMs=${now - runStart} respChars=${respChars}\n`);
     } catch (err) {
       store.appendEvent(run.id, { type: 'error', message: String(err) });
       store.finishRun(run.id, 'error');
@@ -188,13 +194,18 @@ export function createRelayServer(opts: ServerOptions) {
 
   async function handleAudio(ws: WebSocket, wavBase64: string): Promise<void> {
     let text = '';
+    const audioBytes = Buffer.byteLength(wavBase64, 'base64');
     const tmp = join(tmpdir(), `rokid-audio-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`);
+    const t0 = Date.now();
     try {
       await writeFile(tmp, Buffer.from(wavBase64, 'base64'));
       text = await transcriber(tmp, opts.modelPath, lang);
     } catch { text = ''; }
     finally { await unlink(tmp).catch(() => {}); }
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'transcript', text }));
+    const sttMs = Date.now() - t0;
+    // sttMs 让客户端从"发音频→收转写"总时里扣掉 STT,隔离出纯网络耗时(测量用,附加字段无害)
+    process.stderr.write(`[timing] audio bytes=${audioBytes} sttMs=${sttMs} chars=${text.length}\n`);
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'transcript', text, sttMs }));
   }
 
   const tokens = { full: opts.tokenFull ?? opts.token, sandbox: opts.tokenSandbox };
